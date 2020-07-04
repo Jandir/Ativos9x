@@ -1,3 +1,12 @@
+## Script Ativos9x v1.01
+##
+## Autor: twitter.com/jandirp
+##
+## Script para pesquisa de ativos listados em bolsa B3 com possível situação de compra/ou venda
+## Baseado em setup 9.1 Larry Williams ensinado no Brasil por Palex (t.me/palexgram)
+##
+## Script gera um CSV com ativos em situação 9.1 para analise em plataforma de negociação ou gráfico de análise técnica
+
 import pandas_datareader as pdr
 import pandas as pd
 
@@ -6,12 +15,14 @@ import numpy as np
 
 
 # Lista de ativos a serem rastreados na B3
+# Essa lista foi gerada a partir do próprio site da B3
+# Pode-se criar sua própria lista usando a primeira coluna com o nome do ativo desejado.
 dfSymbols = pd.read_csv('AtivosB3.csv', sep=';')
 
 # DataFram para lista dos ativos detectados como 9.1 no último pregão
 dfResultado = pd.DataFrame(columns=['Ativo', 'Operação', 'Dia', 'Start', 'Stop'])
 
-print('Possíveis 9.1 Compra/Venda')
+print('Possíveis 9.1 de Compra/Venda')
 
 for NomedoAtivo in dfSymbols.Asset:
     try:
@@ -33,20 +44,22 @@ for NomedoAtivo in dfSymbols.Asset:
     nPeriodos = 9  # Média Curta
     dfAtivoSemanal['MME9'] = dfAtivoSemanal.Close.ewm(span=nPeriodos).mean().dropna()
 
-    # Ultimo pregão detectado na sequência
-    sUltimoPregao = dfAtivoSemanal.index[-1].strftime('%d/%m/%Y')
+    # Calculo de Média Móvel Longa Exponencial
+    nPeriodos = 21  # Média Longa
+    dfAtivoSemanal['MME21'] = dfAtivoSemanal.Close.ewm(span=nPeriodos).mean().dropna()
 
     ## Slop of MME
     # dfTendencia > 0 diz que a MME9 está para cima ou tendência de alta
     # dfTendencia < 0 dia que a MME9 está para baixo ou tendência de baixa
     dfTendencia = dfAtivoSemanal.MME9 - dfAtivoSemanal.shift(1).MME9
 
-    # Se o candle atravessa a MME9 então é candidato a ser um sinal 9.1 Se atravessa (fecha acima da MME9) e
+    # Se o candle atravessa a MME9 então é candidato a ser um sinal 9.1 Se atravessa
+    #   (fecha acima da MME9) e
     # dfTendencia > 0 então é um 9.1 de compra com disparo da ordem na máxima do candle corrente mais 1 centavo ou tick
     # Esse mais 1 centavo é recomendação do Palex para melhorar a taxa de acerto
     dfAtivoSemanal['mark_max'] = np.where(
-        (dfAtivoSemanal.MME9 < dfAtivoSemanal.High) &
-        (dfAtivoSemanal.MME9 > dfAtivoSemanal.Low) &
+        (dfAtivoSemanal.MME9 < dfAtivoSemanal.Close) &
+        (dfAtivoSemanal.MME9 > dfAtivoSemanal.Open) &
         (dfTendencia > 0),
         dfAtivoSemanal.High + 0.01,
         0
@@ -55,8 +68,8 @@ for NomedoAtivo in dfSymbols.Asset:
     # mínima mais 1 centavo ou tick do candle corrente
     # Esse mais 1 centavo é recomendação do Palex para melhorar a taxa de acerto
     dfAtivoSemanal['mark_min'] = np.where(
-        (dfAtivoSemanal.MME9 > dfAtivoSemanal.Low) &
-        (dfAtivoSemanal.MME9 < dfAtivoSemanal.High) &
+        (dfAtivoSemanal.MME9 > dfAtivoSemanal.Open) &
+        (dfAtivoSemanal.MME9 < dfAtivoSemanal.Close) &
         (dfTendencia < 0),
         dfAtivoSemanal.Low - 0.01,
         0
