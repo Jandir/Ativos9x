@@ -5,3 +5,6 @@ Script para listar ativos na bolsa B3 (Bovespa Brasil) em situação de compra o
 # Importante
 O resultado do script não se trata de recomendações de compra e/ou venda e sim de facilitar o estudo dos ativos em situação favoravél para possíveis transações.
 
+Melhorias feitas no código para suporte a multreading 
+Tempo de execução 10x mais rápido que versão original.
+

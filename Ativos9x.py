@@ -1,77 +1,76 @@
-## Script Ativos9x v1.01
+## Script Ativos9x v1.09 MultiTreading
 ##
 ## Autor: twitter.com/jandirp
 ##
 ## Script para pesquisa de ativos listados em bolsa B3 com possível situação de compra/ou venda
 ## Baseado em setup 9.1 Larry Williams ensinado no Brasil por Palex (t.me/palexgram)
 ##
-## Script gera um CSV com ativos em situação 9.1 para analise em plataforma de negociação ou gráfico de análise técnica
+## Versão com MultTreading
+
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 import pandas_datareader as pdr
-import pandas as pd
+import pandas as pd 
+import time
+import concurrent.futures
 
 from datetime import datetime, timedelta
-import numpy as np
+import numpy as np 
 
-
-# Lista de ativos a serem rastreados na B3
-# Essa lista foi gerada a partir do próprio site da B3
-# Pode-se criar sua própria lista usando a primeira coluna com o nome do ativo desejado.
-dfSymbols = pd.read_csv('AtivosB3.csv', sep=';')
-
-# DataFram para lista dos ativos detectados como 9.1 no último pregão
-dfResultado = pd.DataFrame(columns=['Ativo', 'Operação', 'Dia', 'Start', 'Stop'])
-
-print('Possíveis 9.1 de Compra/Venda')
-
-for NomedoAtivo in dfSymbols.Asset:
+def AnaliseAtivo(sAtivo):
     try:
         # Periodo selecionado aqui é dos últimos 30 dias a partir de hoje.
         # 30 dias se viu como um período mínimo viável para se fazer as médias de apoio ao setup
         # Não será contado o dia de "HOJE" para não pegar pregão em andamento, sempre o hoje-1
-        dfAtivoSemanal = pdr.get_data_yahoo(NomedoAtivo + '.SA',
-                                            start=(datetime.now() - timedelta(30)).strftime('%Y, %m, %d'),
-                                            end=(datetime.now() - timedelta(1)).strftime('%Y, %m, %d')
-                                            )
+        # dfAtivo30Dias = pdr.get_data_yahoo(Ativo + '.SA',
+
+        dfAtivo30Dias = pdr.DataReader(sAtivo + '.SA', 'yahoo',
+            start=(datetime.now() - timedelta(30)).strftime('%Y, %m, %d'),
+            end=(datetime.now() - timedelta(1)).strftime('%Y, %m, %d')
+        )
     except:
         # print(Ativo, "Sem informações para esse ativo...")
-        continue
+        return
 
-    dfAtivoSemanal = dfAtivoSemanal.dropna()
+    dfAtivo30Dias = dfAtivo30Dias.dropna()
 
     # Calculo de Média Móvel Curta Exponencial
     # Pandas permite o calculo da média exponencial (EWM) direto no dataframe sem necessidade de funções a parte
-    nPeriodos = 9  # Média Curta
-    dfAtivoSemanal['MME9'] = dfAtivoSemanal.Close.ewm(span=nPeriodos).mean().dropna()
-
-    # Calculo de Média Móvel Longa Exponencial
-    nPeriodos = 21  # Média Longa
-    dfAtivoSemanal['MME21'] = dfAtivoSemanal.Close.ewm(span=nPeriodos).mean().dropna()
+    # Atualmente o script usa apenas a MME9, as outras serão usadas em implementações futuras.
+    # lPeriodos = (9, 21, 51, 200)
+    lPeriodos = (9, 21)
+    for nPeriodos in lPeriodos:
+        dfAtivo30Dias['MME' + str(nPeriodos)] = dfAtivo30Dias.Close.ewm(span=nPeriodos).mean().dropna()
 
     ## Slop of MME
     # dfTendencia > 0 diz que a MME9 está para cima ou tendência de alta
     # dfTendencia < 0 dia que a MME9 está para baixo ou tendência de baixa
-    dfTendencia = dfAtivoSemanal.MME9 - dfAtivoSemanal.shift(1).MME9
+    # O calculo original preve apenas a ocorrencia MME9 do elemento anterior para detectar
+    # a tendência do preço.
+    # para melhorar a qualidade de detecção do setup deve-se colocar mais elementos para se definir 
+    # com mais precisão a tendência de alta ou de baixa.
+    dfTendencia = dfAtivo30Dias.MME9 - dfAtivo30Dias.shift(1).MME9
 
     # Se o candle atravessa a MME9 então é candidato a ser um sinal 9.1 Se atravessa
     #   (fecha acima da MME9) e
     # dfTendencia > 0 então é um 9.1 de compra com disparo da ordem na máxima do candle corrente mais 1 centavo ou tick
     # Esse mais 1 centavo é recomendação do Palex para melhorar a taxa de acerto
-    dfAtivoSemanal['mark_max'] = np.where(
-        (dfAtivoSemanal.MME9 < dfAtivoSemanal.Close) &
-        (dfAtivoSemanal.MME9 > dfAtivoSemanal.Open) &
+    dfAtivo30Dias['mark_max'] = np.where(
+        (dfAtivo30Dias.MME9 < dfAtivo30Dias.Close) &
+        (dfAtivo30Dias.MME9 > dfAtivo30Dias.Open) &
         (dfTendencia > 0),
-        dfAtivoSemanal.High + 0.01,
+        dfAtivo30Dias.High + 0.01,
         0
     )
     # Se atravessa (fecha abaixo da MME9) e dfTendencia < 0 então é um 9.1 de venda com disparo da ordem de venda na
     # mínima mais 1 centavo ou tick do candle corrente
     # Esse mais 1 centavo é recomendação do Palex para melhorar a taxa de acerto
-    dfAtivoSemanal['mark_min'] = np.where(
-        (dfAtivoSemanal.MME9 > dfAtivoSemanal.Open) &
-        (dfAtivoSemanal.MME9 < dfAtivoSemanal.Close) &
+    dfAtivo30Dias['mark_min'] = np.where(
+        (dfAtivo30Dias.MME9 > dfAtivo30Dias.Open) &
+        (dfAtivo30Dias.MME9 < dfAtivo30Dias.Close) &
         (dfTendencia < 0),
-        dfAtivoSemanal.Low - 0.01,
+        dfAtivo30Dias.Low - 0.01,
         0
     )
 
@@ -86,47 +85,51 @@ for NomedoAtivo in dfSymbols.Asset:
     #       VENDA 1 centavo a menos que a mínima do candle corrente ou do último pregão
 
     # Pegar preços de entrada
-    dfAtivoSemanal['buy_start'] = dfAtivoSemanal.mark_max
-    dfAtivoSemanal['sell_start'] = dfAtivoSemanal.mark_min
+    dfAtivo30Dias['buy_start'] = dfAtivo30Dias.mark_max
+    dfAtivo30Dias['sell_start'] = dfAtivo30Dias.mark_min
 
     # Pegar preços de saida
-    dfAtivoSemanal['buy_stop'] = np.where(
-        (dfAtivoSemanal.mark_max > 0),
-        dfAtivoSemanal.Low,
+    dfAtivo30Dias['buy_stop'] = np.where(
+        (dfAtivo30Dias.mark_max > 0),
+        dfAtivo30Dias.Low,
         0
     )
-    dfAtivoSemanal['sell_stop'] = np.where(
-        (dfAtivoSemanal.mark_min > 0),
-        dfAtivoSemanal.High,
+    dfAtivo30Dias['sell_stop'] = np.where(
+        (dfAtivo30Dias.mark_min > 0),
+        dfAtivo30Dias.High,
         0
     )
 
-    dfUltimoNegocio = dfAtivoSemanal.tail(1)
+    dfUltimoNegocio = dfAtivo30Dias.tail(1)
 
     if dfUltimoNegocio.buy_start[0] > 0:
         sStart = "R${:,.2f}".format(dfUltimoNegocio.buy_start[0])
         sStop  = "R${:,.2f}".format(dfUltimoNegocio.buy_stop[0])
-        print(NomedoAtivo, 'Compra', dfUltimoNegocio.index[0].strftime("%d/%m/%Y"), sStart, sStop)
-        dfResultado = dfResultado.append({
-            'Ativo': NomedoAtivo,
-            'Operação': 'Compra',
-            'Dia': dfUltimoNegocio.index[0].strftime("%d/%m/%Y"),
-            'Start': sStart,
-            'Stop': sStop
-        }, ignore_index=True)
+        print(sAtivo, 'Compra', dfUltimoNegocio.index[0].strftime("%d/%m/%Y"), sStart, sStop)
     elif dfUltimoNegocio.sell_start[0] > 0:
         sStart = "R${:,.2f}".format(dfUltimoNegocio.sell_start[0])
         sStop = "R${:,.2f}".format(dfUltimoNegocio.sell_stop[0])
-        print(NomedoAtivo, 'Venda', dfUltimoNegocio.index[0].strftime("%d/%m/%Y"), sStart, sStop)
-        ##columns=['Ativo', 'Operação', 'Dia', 'Start', 'Stop'])
+        print(sAtivo, 'Venda', dfUltimoNegocio.index[0].strftime("%d/%m/%Y"), sStart, sStop)
 
-        dfResultado = dfResultado.append({
-            'Ativo': NomedoAtivo,
-            'Operação': 'Venda',
-            'Dia': dfUltimoNegocio.index[0].strftime("%d/%m/%Y"),
-            'Start': sStart,
-            'Stop': sStop
-        }, ignore_index=True)
+def main():
+    tInicio = time.perf_counter()
 
-print(dfResultado)
-dfResultado.to_csv('Ativos9x.csv')
+    # Lista de ativos a serem rastreados na B3
+    # Essa lista foi gerada a partir do próprio site da B3
+    # Pode-se criar sua própria lista usando a primeira coluna com o nome do ativo desejado.
+    dfSymbols = pd.read_csv('AtivosB3.csv', sep=';')
+
+    # DataFram para lista dos ativos detectados como 9.1 no último pregão
+    dfResultado = pd.DataFrame(columns=['Ativo', 'Operação', 'Dia', 'Start', 'Stop'])
+
+    print('Possíveis 9.1 de Compra/Venda')
+
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        executor.map(AnaliseAtivo, dfSymbols.Asset)
+
+    tFinal = time.perf_counter()
+
+    print(f'Finalização em {tFinal-tInicio} segundos')
+
+if __name__ == '__main__':
+    main()
